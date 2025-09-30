@@ -20,6 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+        # 👇 NEW: compute lowercase owner + image names
+      - name: Compute lowercase image names
+        shell: bash
+        run: |
+          echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+          echo "IMAGE_API=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/uptime-api" >> $GITHUB_ENV
+          echo "IMAGE_MONITOR=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/uptime-monitor" >> $GITHUB_ENV
+
       # ---- Gitleaks (secrets) ----
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -32,7 +40,6 @@ jobs:
         with:
           config: p/ci
 
-      # ---- Login to GHCR ----
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -40,39 +47,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ---- Build & push API ----
       - name: Build & push API
         uses: docker/build-push-action@v6
         with:
           context: ./services/api
           push: true
           tags: |
-            ghcr.io/${{ env.IMAGE_API }}:latest
-            ghcr.io/${{ env.IMAGE_API }}:${{ github.sha }}
+            ${{ env.IMAGE_API }}:latest
+            ${{ env.IMAGE_API }}:${{ github.sha }}
 
-      # ---- Build & push Monitor ----
       - name: Build & push Monitor
         uses: docker/build-push-action@v6
         with:
           context: ./services/monitor
           push: true
           tags: |
-            ghcr.io/${{ env.IMAGE_MONITOR }}:latest
-            ghcr.io/${{ env.IMAGE_MONITOR }}:${{ github.sha }}
+            ${{ env.IMAGE_MONITOR }}:latest
+            ${{ env.IMAGE_MONITOR }}:${{ github.sha }}
 
-      # ---- Trivy scan for images ----
       - name: Trivy scan (API)
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ghcr.io/${{ env.IMAGE_API }}:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_API }}:${{ github.sha }}
           format: sarif
           output: trivy-api.sarif
+
       - name: Trivy scan (Monitor)
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ghcr.io/${{ env.IMAGE_MONITOR }}:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_MONITOR }}:${{ github.sha }}
           format: sarif
           output: trivy-monitor.sarif
+
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v3
         with:
