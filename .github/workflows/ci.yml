@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ${{ github.repository_owner }}/uptime-api
+  IMAGE_MONITOR: ${{ github.repository_owner }}/uptime-monitor
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # push to GHCR
+      security-events: write   # upload security results
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Gitleaks (secrets) ----
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --no-git -v
+
+      # ---- Semgrep (SAST) ----
+      - name: Semgrep scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/ci
+
+      # ---- Login to GHCR ----
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---- Build & push API ----
+      - name: Build & push API
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/api
+          push: true
+          tags: |
+            ghcr.io/${{ env.IMAGE_API }}:latest
+            ghcr.io/${{ env.IMAGE_API }}:${{ github.sha }}
+
+      # ---- Build & push Monitor ----
+      - name: Build & push Monitor
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/monitor
+          push: true
+          tags: |
+            ghcr.io/${{ env.IMAGE_MONITOR }}:latest
+            ghcr.io/${{ env.IMAGE_MONITOR }}:${{ github.sha }}
+
+      # ---- Trivy scan for images ----
+      - name: Trivy scan (API)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ env.IMAGE_API }}:${{ github.sha }}
+          format: sarif
+          output: trivy-api.sarif
+      - name: Trivy scan (Monitor)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ env.IMAGE_MONITOR }}:${{ github.sha }}
+          format: sarif
+          output: trivy-monitor.sarif
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-api.sarif
+
+      # ---- Checkov (K8s/IaC) ----
+      - name: Checkov IaC scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: kubernetes,terraform
